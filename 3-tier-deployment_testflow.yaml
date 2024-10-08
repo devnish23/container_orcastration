@@ -1,0 +1,246 @@
+# -------------------------------
+# Frontend Ingress Configuration
+# -------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: frontend.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 80
+
+# -------------------------------
+---
+# Frontend Service Configuration
+# -------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  selector:
+    app: frontend
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+
+# -------------------------------
+---
+# Frontend Deployment Configuration
+# -------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+
+# -------------------------------
+---
+# Backend Service Configuration
+# -------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: backend
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+# -------------------------------
+---
+# Backend Deployment Configuration
+# -------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: tiangolo/uwsgi-nginx-flask:python3.8
+        env:
+        - name: FLASK_APP
+          value: "app.py"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: app-source
+          mountPath: /app
+      volumes:
+      - name: app-source
+        configMap:
+          name: backend-config
+
+# -------------------------------
+---
+# Database Service Configuration
+# -------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-service
+spec:
+  selector:
+    app: database
+  ports:
+  - protocol: TCP
+    port: 3306
+    targetPort: 3306
+  type: ClusterIP
+
+# -------------------------------
+---
+# Database Deployment Configuration
+# -------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: database
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+      - name: database
+        image: mysql:5.7
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "rootpassword"
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pv-claim
+
+# -------------------------------
+---
+# Persistent Volume for MySQL
+# -------------------------------
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+
+# -------------------------------
+---
+# Persistent Volume Claim for MySQL
+# -------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pv-claim
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+# -------------------------------
+---
+# ConfigMap for Backend
+# -------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  app.py: |
+    from flask import Flask
+    app = Flask(__name__)
+
+    @app.route('/')
+    def hello():
+        return "Hello from the Backend API!"
+
+# -------------------------------
+---
+# Log Collector DaemonSet Configuration
+# -------------------------------
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-collector
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: log-collector
+  template:
+    metadata:
+      labels:
+        app: log-collector
+    spec:
+      containers:
+      - name: log-collector
+        image: fluentd:latest
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+        - name: dockerlog
+          mountPath: /var/lib/docker/containers
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: dockerlog
+        hostPath:
+          path: /var/lib/docker/containers
